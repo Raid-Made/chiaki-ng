@@ -44,8 +44,9 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y make perl python3-pip
+          sudo apt-get install -y make perl python3-pip protobuf-compiler
           python3 -m pip install --user --break-system-packages protobuf grpcio-tools
+          protoc --version
 
       - name: Prepare Android release version
         id: version

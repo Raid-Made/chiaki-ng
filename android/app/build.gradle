@@ -17,7 +17,10 @@ def chiakiVersionMajor = grepVersionComponent(rootCMakeListsContent, "CHIAKI_VER
 def chiakiVersionMinor = grepVersionComponent(rootCMakeListsContent, "CHIAKI_VERSION_MINOR")
 def chiakiVersionPatch = grepVersionComponent(rootCMakeListsContent, "CHIAKI_VERSION_PATCH")
 def chiakiVersion = "$chiakiVersionMajor.$chiakiVersionMinor.$chiakiVersionPatch"
+def androidVersionName = System.getenv("CHIAKI_ANDROID_VERSION_NAME") ?: chiakiVersion
+def androidVersionCode = System.getenv("CHIAKI_ANDROID_VERSION_CODE")?.toInteger() ?: 12
 println("Determined Chiaki Version: $chiakiVersion")
+println("Android package version: $androidVersionName ($androidVersionCode)")
 
 android {
     namespace "com.metallic.chiaki"
@@ -25,11 +28,11 @@ android {
     ndkVersion "28.2.13676358"
 
     defaultConfig {
-        applicationId "com.metallic.chiaki"
+        applicationId "com.raidmade.chiaking"
         minSdk 24
         targetSdk 35
-        versionCode 12
-        versionName chiakiVersion
+        versionCode androidVersionCode
+        versionName androidVersionName
         externalNativeBuild {
             cmake {
                 arguments "-DCHIAKI_ENABLE_TESTS=OFF",
@@ -91,14 +94,18 @@ android {
         properties.load(propertiesFile.newDataInputStream())
     }
 
-    if(properties.containsKey("chiakiKeystore")) {
-        println("Enabling Local Signing")
+    def chiakiKeystore = System.getenv("CHIAKI_ANDROID_KEYSTORE") ?: properties.getProperty("chiakiKeystore")
+    def chiakiKeystorePW = System.getenv("CHIAKI_ANDROID_KEYSTORE_PASSWORD") ?: properties.getProperty("chiakiKeystorePW")
+    def chiakiKeyAlias = System.getenv("CHIAKI_ANDROID_KEY_ALIAS") ?: properties.getProperty("chiakiKeyAlias")
+    def chiakiKeyPW = System.getenv("CHIAKI_ANDROID_KEY_PASSWORD") ?: properties.getProperty("chiakiKeyPW")
+
+    if(chiakiKeystore && chiakiKeystorePW && chiakiKeyAlias && chiakiKeyPW) {
+        println("Enabling Release Signing")
         buildTypes.release.signingConfig = signingConfigs.release
-        buildTypes.debug.signingConfig = signingConfigs.release
-        signingConfigs.release.storeFile = file(properties.get("chiakiKeystore"))
-        signingConfigs.release.storePassword = properties.get("chiakiKeystorePW")
-        signingConfigs.release.keyAlias = properties.get("chiakiKeyAlias")
-        signingConfigs.release.keyPassword = properties.get("chiakiKeyPW")
+        signingConfigs.release.storeFile = file(chiakiKeystore)
+        signingConfigs.release.storePassword = chiakiKeystorePW
+        signingConfigs.release.keyAlias = chiakiKeyAlias
+        signingConfigs.release.keyPassword = chiakiKeyPW
     } else {
         println("Signing not enabled")
     }

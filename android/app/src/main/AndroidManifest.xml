@@ -17,7 +17,7 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="Chiaki-ng Android"
         android:isGame="true"
         android:banner="@mipmap/atv_banner"
         android:roundIcon="@mipmap/ic_launcher_round"

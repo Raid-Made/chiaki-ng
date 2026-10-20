@@ -18,7 +18,7 @@ The package ID is separate from the older `com.metallic.chiaki` app, so both can
 
 Build and release details: [ANDROID_RELEASE.md](ANDROID_RELEASE.md).
 
-Android build maintained by [Raid-Made](https://github.com/Raid-Made), built together with Claude (Anthropic). chiaki-ng itself is the work of the [chiaki-ng project](https://github.com/chiaki-ng/chiaki-ng).
+Android build maintained by [Raid-Made](https://github.com/Raid-Made), with contributions from Claude (Anthropic). chiaki-ng itself is the work of the [chiaki-ng project](https://github.com/chiaki-ng/chiaki-ng).
 
 ---
 

@@ -2326,12 +2326,15 @@ static AVFrame *make_fallback_snapshot_frame(const AVFrame *frame)
     return copy;
 }
 
-static AVFrame *make_startup_warmup_frame(unsigned width, unsigned height, bool hdr)
+static AVFrame *make_startup_warmup_frame(unsigned width, unsigned height, bool hdr, bool semi_planar)
 {
     if (width == 0 || height == 0)
         return nullptr;
 
-    const enum AVPixelFormat format = hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+    // semi_planar matches what hardware decoders hand over after transfer (NV12/P010)
+    const enum AVPixelFormat format = semi_planar
+        ? (hdr ? AV_PIX_FMT_P010LE : AV_PIX_FMT_NV12)
+        : (hdr ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P);
     AVFrame *frame = av_frame_alloc();
     if (!frame)
         return nullptr;
@@ -2359,7 +2362,24 @@ static AVFrame *make_startup_warmup_frame(unsigned width, unsigned height, bool 
 
     const int chroma_width = (frame->width + 1) / 2;
     const int chroma_height = (frame->height + 1) / 2;
-    if (format == AV_PIX_FMT_YUV420P) {
+    if (format == AV_PIX_FMT_NV12) {
+        for (int y = 0; y < frame->height; ++y)
+            memset(frame->data[0] + y * frame->linesize[0], 16, frame->width);
+        for (int y = 0; y < chroma_height; ++y)
+            memset(frame->data[1] + y * frame->linesize[1], 128, chroma_width * 2);
+    } else if (format == AV_PIX_FMT_P010LE) {
+        // P010 keeps the 10-bit value in the high bits
+        for (int y = 0; y < frame->height; ++y) {
+            auto *row = reinterpret_cast<uint16_t *>(frame->data[0] + y * frame->linesize[0]);
+            for (int x = 0; x < frame->width; ++x)
+                row[x] = 64 << 6;
+        }
+        for (int y = 0; y < chroma_height; ++y) {
+            auto *row = reinterpret_cast<uint16_t *>(frame->data[1] + y * frame->linesize[1]);
+            for (int x = 0; x < chroma_width * 2; ++x)
+                row[x] = 512 << 6;
+        }
+    } else if (format == AV_PIX_FMT_YUV420P) {
         for (int y = 0; y < frame->height; ++y)
             memset(frame->data[0] + y * frame->linesize[0], 16, frame->width);
         for (int y = 0; y < chroma_height; ++y) {
@@ -2589,6 +2609,7 @@ QmlMainWindow::~QmlMainWindow()
 #endif
 
     if (pl_gpu gpu = placeboGpu()) {
+        pl_unmap_avframe(gpu, &direct_frame);
         if (quick_tex)
             pl_tex_destroy(gpu, &quick_tex);
         for (auto &tex : placebo_tex)
@@ -2601,6 +2622,7 @@ QmlMainWindow::~QmlMainWindow()
         QMutexLocker locker(&pending_frame_mutex);
         clearPendingFrameStateLocked();
     }
+    av_frame_free(&direct_pending_frame);
     {
         QMutexLocker locker(&reset_seed_mutex);
         if (reset_seed_frame)
@@ -2749,7 +2771,7 @@ void QmlMainWindow::presentStartupWarmupFrame(unsigned width, unsigned height, b
     if (has_video || width == 0 || height == 0)
         return;
 
-    AVFrame *frame = make_startup_warmup_frame(width, height, hdr);
+    AVFrame *frame = make_startup_warmup_frame(width, height, hdr, render_backend == RenderBackend::OpenGL);
     if (!frame)
         return;
     startup_warmup_preserve_next_session_change = true;
@@ -2924,6 +2946,8 @@ static const struct pl_filter_config *frame_mixer_config(Settings *settings)
 
 const struct pl_filter_config *QmlMainWindow::effectiveFrameMixerConfig(const struct pl_render_params *render_params) const
 {
+    if (bypass_frame_queue)
+        return nullptr;
     Q_UNUSED(render_params);
 
     switch (video_preset) {
@@ -2949,6 +2973,8 @@ bool QmlMainWindow::effectiveFrameMixerEnabled(const struct pl_render_params *re
 
 bool QmlMainWindow::configuredFrameMixerEnabledForScheduling() const
 {
+    if (bypass_frame_queue)
+        return false;
     switch (video_preset) {
     case VideoPreset::Fast:
         return frame_mixer_config(settings) != nullptr;
@@ -2981,6 +3007,21 @@ void QmlMainWindow::presentFrame(ChiakiFfmpegFrame frame, int32_t frames_lost, q
 
     if (!frame.frame)
         return;
+
+    if (bypass_frame_queue) {
+        {
+            QMutexLocker locker(&direct_frame_mutex);
+            if (direct_pending_frame) {
+                av_frame_free(&direct_pending_frame);
+                dropped_frames_current.fetchAndAddRelaxed(1);
+            }
+            direct_pending_frame = frame.frame;
+        }
+        if (!startup_warmup_frame_active)
+            startup_first_real_frame_queued_pending_visibility.storeRelease(1);
+        scheduleUpdate(false, UpdateRequestReason::PendingFrame);
+        return;
+    }
 
     const bool synthetic_warmup_frame = startup_warmup_frame_active;
     double frame_queue_origin = synthetic_warmup_frame ? 0.0 : queue_pts_origin;
@@ -3368,6 +3409,10 @@ void QmlMainWindow::setStreamMaxFPS(unsigned int max_fps)
 
 void QmlMainWindow::resetPlaceboQueue()
 {
+    if (bypass_frame_queue) {
+        placebo_reset_preserve_timeline.storeRelease(0);
+        return;
+    }
     uint64_t now_ms = chiaki_time_now_monotonic_ms();
     const bool preserve_timeline = placebo_reset_preserve_timeline.loadAcquire() != 0;
     if (!preserve_timeline && last_placebo_reset_ts && now_ms - last_placebo_reset_ts < 100)
@@ -4556,6 +4601,10 @@ bool QmlMainWindow::pendingFrameOverflowEnabled() const
 
 bool QmlMainWindow::hasBufferedWork()
 {
+    if (bypass_frame_queue) {
+        QMutexLocker locker(&direct_frame_mutex);
+        return direct_pending_frame != nullptr;
+    }
     if (queue_depth_cached.loadAcquire() > 0)
         return true;
     if (placebo_state_mutex.tryLock()) {
@@ -4742,6 +4791,7 @@ void QmlMainWindow::doneOpenGLContextCurrent()
 
 void QmlMainWindow::init(Settings *settings, bool exit_app_on_stream_exit)
 {
+    bypass_frame_queue = settings->GetDirectFrameMapping();
     render_backend = settings->GetRenderBackend();
     setSurfaceType(render_backend == RenderBackend::Vulkan ? QWindow::VulkanSurface : QWindow::OpenGLSurface);
     qparams = {};
@@ -5067,6 +5117,11 @@ renderer_backend_ready:
         if (!s)
             drainRenderThread();
         if (!preserve_startup_warmup) {
+            {
+                QMutexLocker locker(&direct_frame_mutex);
+                av_frame_free(&direct_pending_frame);
+                direct_frame_reset.storeRelease(1);
+            }
             {
                 QMutexLocker locker(&placebo_state_mutex);
                 pl_queue_reset(placebo_queue);
@@ -5992,6 +6047,10 @@ void QmlMainWindow::resizeSwapchain()
             doneOpenGLContextCurrent();
             return;
         }
+        // A new FBO holds whatever was in that GPU memory; the overlay can be composited
+        // before Qt Quick renders into it again, which shows up as garbage on the loading screen.
+        clearQuickOpenGLTarget(new_quick_fbo);
+        QOpenGLFramebufferObject::bindDefault();
 
         int quick_texture_internal_format = static_cast<int>(new_quick_fbo->format().internalTextureFormat());
         if (!quick_texture_internal_format)
@@ -6619,7 +6678,44 @@ void QmlMainWindow::render()
     bool kept_frame_enqueued = false;
     const qint64 queue_update_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
     int queue_depth_before_update = -1;
-    {
+    struct pl_frame direct_render_frame = {};
+    const struct pl_frame *direct_frames[] = { &direct_render_frame };
+    const float direct_timestamps[] = { 0.0f };
+    if (bypass_frame_queue) {
+        AVFrame *incoming = nullptr;
+        bool reset_direct_frame = false;
+        {
+            QMutexLocker locker(&direct_frame_mutex);
+            std::swap(incoming, direct_pending_frame);
+            reset_direct_frame = direct_frame_reset.fetchAndStoreRelaxed(0) != 0;
+        }
+        if (reset_direct_frame) {
+            pl_unmap_avframe(placeboGpu(), &direct_frame);
+            direct_frame = {};
+        }
+        if (incoming) {
+            pl_unmap_avframe(placeboGpu(), &direct_frame);
+            direct_frame = {};
+            pl_avframe_params avparams = {};
+            avparams.frame = incoming;
+            avparams.tex = placebo_tex.data();
+            if (!pl_map_avframe_ex(placeboGpu(), &direct_frame, &avparams)) {
+                qCWarning(chiakiGui) << "Failed to map direct video frame";
+                pl_unmap_avframe(placeboGpu(), &direct_frame);
+                direct_frame = {};
+                if (backend && backend->zeroCopy())
+                    backend->disableZeroCopy();
+            }
+            av_frame_free(&incoming);
+        }
+        direct_render_frame = direct_frame;
+        frame_mix = {};
+        frame_mix.num_frames = direct_frame.num_planes > 0 ? 1 : 0;
+        frame_mix.frames = direct_frames;
+        frame_mix.timestamps = direct_timestamps;
+        queue_status = PL_QUEUE_OK;
+        queue_depth_before_update = 0;
+    } else {
         TimedMutexLocker locker(placebo_state_mutex, "render_queue_update");
         queue_depth_before_update = pl_queue_num_frames(placebo_queue);
         const qint64 queue_update_work_begin_us = static_cast<qint64>(chiaki_time_now_monotonic_us());
@@ -7379,7 +7475,9 @@ void QmlMainWindow::render()
         logLatencyStats("render_prep", render_call_begin_us - render_entry_us_local);
     if (render_call_begin_us >= render_setup_begin_us)
         logRenderSetupStats(render_call_begin_us, render_call_begin_us - render_setup_begin_us);
-    if (!pl_render_image_mix(placebo_renderer, &frame_mix, &target_frame, &params))
+    if (!(bypass_frame_queue
+        ? pl_render_image(placebo_renderer, &direct_render_frame, &target_frame, &params)
+        : pl_render_image_mix(placebo_renderer, &frame_mix, &target_frame, &params)))
     {
         qCWarning(chiakiGui) << "Failed to render Placebo frame!";
         close_started_frame(false);

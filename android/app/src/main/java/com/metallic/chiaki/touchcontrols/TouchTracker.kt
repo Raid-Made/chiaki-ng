@@ -39,6 +39,12 @@ class TouchTracker
 				}
 			}
 
+			MotionEvent.ACTION_CANCEL ->
+			{
+				pointerId = null
+				currentPosition = null
+			}
+
 			MotionEvent.ACTION_MOVE ->
 			{
 				val pointerId = pointerId

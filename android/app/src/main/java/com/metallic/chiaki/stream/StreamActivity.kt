@@ -27,6 +27,7 @@ import com.metallic.chiaki.common.ext.viewModelFactory
 import com.metallic.chiaki.databinding.ActivityStreamBinding
 import com.metallic.chiaki.lib.ConnectInfo
 import com.metallic.chiaki.lib.ConnectVideoProfile
+import com.metallic.chiaki.lib.ControllerState
 import com.metallic.chiaki.session.*
 import com.metallic.chiaki.touchcontrols.DefaultTouchControlsFragment
 import com.metallic.chiaki.touchcontrols.TouchControlsFragment
@@ -136,16 +137,23 @@ class StreamActivity : AppCompatActivity()
 		}
 	}
 
-	private var controlsJob: Job? = null
+	// Every attached TouchControlsFragment (on-screen controls and touchpad-only) contributes to the
+	// touch input, so each one is collected and their states are merged instead of the latest one winning.
+	private val controlsJobs = mutableMapOf<TouchControlsFragment, Job>()
+	private val touchControllerStates = mutableMapOf<TouchControlsFragment, ControllerState>()
 
 	override fun onAttachFragment(fragment: Fragment)
 	{
 		super.onAttachFragment(fragment)
 		if(fragment is TouchControlsFragment)
 		{
-			controlsJob?.cancel()
-			controlsJob = fragment.controllerState
-				.onEach { viewModel.input.touchControllerState = it }
+			controlsJobs.remove(fragment)?.cancel()
+			controlsJobs[fragment] = fragment.controllerState
+				.onEach {
+					touchControllerStates[fragment] = it
+					viewModel.input.touchControllerState =
+						touchControllerStates.values.fold(ControllerState()) { acc, state -> acc or state }
+				}
 				.launchIn(lifecycleScope)
 			fragment.onScreenControlsEnabled = viewModel.onScreenControlsEnabled
 			if(fragment is TouchpadOnlyFragment)
@@ -169,7 +177,9 @@ class StreamActivity : AppCompatActivity()
 	override fun onDestroy()
 	{
 		super.onDestroy()
-		controlsJob?.cancel()
+		controlsJobs.values.forEach { it.cancel() }
+		controlsJobs.clear()
+		touchControllerStates.clear()
 	}
 
 	private fun reconnect()

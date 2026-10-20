@@ -83,7 +83,7 @@ class ButtonView @JvmOverloads constructor(
 					return false
 				buttonPressed = true
 			}
-			MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+			MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
 				buttonPressed = false
 			}
 		}

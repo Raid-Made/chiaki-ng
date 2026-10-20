@@ -20,6 +20,12 @@
             app:icon="@drawable/ic_gamepad" />
 
         <SwitchPreference
+            app:key="@string/preferences_on_screen_controls_enabled_key"
+            app:title="@string/preferences_on_screen_controls_enabled_title"
+            app:summary="@string/preferences_on_screen_controls_enabled_summary"
+            app:icon="@drawable/ic_gamepad" />
+
+        <SwitchPreference
             app:key="@string/preferences_rumble_enabled_key"
             app:title="@string/preferences_rumble_enabled_title"
             app:summary="@string/preferences_rumble_enabled_summary"

@@ -78,7 +78,7 @@ The workflow:
 6. generates a SHA-256 checksum; and
 7. creates the latest GitHub Release containing the APK and checksum.
 
-The Android `versionCode` uses the UTC Unix timestamp so every later release has a greater version code. The visible version name includes the upstream chiaki-ng version and an Android build timestamp.
+The Android `versionCode` uses the UTC Unix timestamp so every later release has a greater version code. The visible version name includes the upstream chiaki-ng version and an Android build timestamp (`1.10.0-android.202610200938`), and the release tag is that version name with a `v` prefix (`v1.10.0-android.202610200938`). Keep the tag and version name in this form: Komi compares the tag with the installed app's version name, and releases tagged in a different form (the earlier `android-v1.10.0-<stamp>`) can show *Install* instead of *Update*.
 
 ## Komi
 

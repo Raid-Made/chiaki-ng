@@ -68,7 +68,9 @@ jobs:
           stamp=$(date -u +%Y%m%d%H%M)
           version_name="${base_version}-android.${stamp}"
           version_code=$(date -u +%s)
-          release_tag="android-v${base_version}-${stamp}"
+          # Tag = "v" + the APK's versionName. Update checkers such as Komi compare
+          # the tag with the installed versionName, so the two must match in form.
+          release_tag="v${version_name}"
           asset_name="chiaki-ng-android-universal-${version_name}.apk"
 
           echo "CHIAKI_ANDROID_VERSION_NAME=${version_name}" >> "$GITHUB_ENV"

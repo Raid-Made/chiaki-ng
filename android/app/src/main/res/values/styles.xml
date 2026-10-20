@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="AppTheme" parent="Theme.MaterialComponents.NoActionBar">
         <item name="colorPrimary">@color/primary</item>
         <item name="colorPrimaryDark">@color/primary_dark</item>
@@ -12,6 +12,11 @@
         <item name="alertDialogTheme">@style/AppTheme.AlertDialog.NonMaterial</item>
 
         <item name="android:windowActivityTransitions">true</item>
+        <!-- targetSdk 35 forces edge-to-edge on Android 15+, which put the toolbar
+             (and its overflow menu) under the status bar in portrait. Keep the
+             classic layout below the system bars. Only honoured while targetSdk
+             is 35; raising it to 36 requires handling window insets instead. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
     </style>
 
     <style name="AppTheme.Toolbar" parent="AppTheme">
@@ -66,6 +71,11 @@
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
 
         <item name="materialAlertDialogTheme">@style/AppTheme.AlertDialog</item>
+        <!-- targetSdk 35 forces edge-to-edge on Android 15+, which put the toolbar
+             (and its overflow menu) under the status bar in portrait. Keep the
+             classic layout below the system bars. Only honoured while targetSdk
+             is 35; raising it to 36 requires handling window insets instead. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">true</item>
     </style>
 
     <style name="MageTheme.Translucent" parent="MageTheme">
